@@ -62,10 +62,81 @@ We will go in detail on each component from here.
 
 There are multiple choices for the location of SSL offloading. We can offload that at AWS NLB as well as Ingress. Here we are adding it at Service Mesh Gateway level. For that we are creating a  secret of type tls.
 
-`kubectl create -n istio-system secret tls havefish-creds --key=IstioConfigs/server.key --cert=IstioConfigs/www_havefish_ml.crt`
+`kubectl create -n istio-system secret tls havefish-ssl --key=IstioConfigs/server.key --cert=IstioConfigs/www_havefish_ml.crt`
 
 
-We can configure some autorotating certificates like letsencrypt or zerossl with the help of `cert-manager` but we are using static certifates for now.
+We can configure 3rd party issuers like letsencrypt or zerossl with the help of `cert-manager` but we are using static certifates for now.
+If we are going for 3rd party Ex: letsencrypt here is the steps
+1. **Validate your Domain ownership with any DNS provider. (Here we will use ACMEDNS):**
+
+  * Send Request to any acme dns auth provider.
+  
+  `echo "{\"havefish.ml\": $(curl -s -X POST  https://auth.acme-dns.io/register)}" >> /tmp/acme.json`
+
+  which returns
+
+```json
+{
+  "havefish.ml": {
+    "username": "09862930-b755-4778-8cd2-c9dab9da53cd",
+    "password": "R0Rhpe3z0DgH0s22mcEdgp-kDQCEZbhFIFgzzbIV",
+    "fulldomain": "80ca8671-f8a2-4d52-a1e7-4c1184b77177.auth.acme-dns.io",
+    "subdomain": "80ca8671-f8a2-4d52-a1e7-4c1184b77177",
+    "allowfrom": []
+  }
+}
+```
+ * create a cname record `_acme-challenge.havefish.ml` resolving to returned `"fulldomain"`. 
+ * create a secret with the returned value. 
+ 
+ `kubectl create secret generic acme-dns --from-file /tmp/acme.json`
+  
+2. **Configure LetsEncrypt as Issuer**
+
+   * using the secret generated in previous step we will create a ClusterIssuer
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+  namespace: kube-system
+spec:
+  acme:
+    email: tanmaya.cs@gmail.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: havefish-ssl
+    solvers:
+    - dns01:
+        acmeDNS:
+          host: https://auth.acme-dns.io
+          accountSecretRef:
+            name: acme-dns
+            key: acme.json
+```
+   
+3. **Generate Certificate:**
+
+   * Once the issuer is ready we can request to generate certificate. 
+   
+```yaml
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: havefish-ssl
+  namespace: kube-system
+spec:
+  commonName: "*.havefish.ml"
+  dnsNames:
+  - "*.havefish.ml"
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+  secretName: havefish-ssl
+```
+  Now our certificate is ready to be ingested to Istio Gateway.
+
+
 
 ### Istio
 
@@ -77,7 +148,6 @@ We are enabling auto sidecar injection to out application pods by annotating the
 
 `kubectl label namespace sample-app istio-injection=enabled`
 
-Apart for the main installation we are adding monitoring tools like prometheus, grafana, zipkin etc
 We are using the secret genereted before on `defalut-gateway`
 
 ```yaml
@@ -105,7 +175,7 @@ spec:
     hosts:
       - '*'
     tls:
-      credentialName: havefish-creds
+      credentialName: havefish-ssl
       mode: SIMPLE
 ```
 
