@@ -11,7 +11,7 @@ cd $PWD
 
 # Install Istio
 kubectl create namespace istio-system
-istioctl install --set profile=default -y
+istioctl install --set profile=default  --set hub=gcr.io/istio-release -y
 
 # Verify
 kubectl get pods -n istio-system
