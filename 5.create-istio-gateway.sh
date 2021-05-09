@@ -24,6 +24,6 @@ spec:
     hosts:
       - '*'
     tls:
-      credentialName: havefish-creds
+      credentialName: havefish-ssl
       mode: SIMPLE
 EOF
