@@ -1,3 +1,5 @@
+# BlueGreen Deployment
+
 **Problem:** "Deploy a sample containerised application on EKS and make it accessible on a https domain.
 Envision blue-green deployment of this  application."
    
@@ -22,16 +24,20 @@ We devide this problem to 4 parts.
    4. Manual/Tool based solution of deployments and traffic management.
    5. We will be using Istio for service Mesh, ArgoCD and ArgoRollout for Deployment versioning and automated traffic management and can get a free ssl from ssl.com
    
-   As we are seeing on the diagram we have an EKS cluster with Istio running as service mesh. Once we change the image id of the application at [GitOpsConfigStore](https://github.com/tanmayakp/gitops-config-store.git) ArgoCD will detect the change and start deploying the preview rollout. We have two domain www.havefish.ml pointing to active group (green) and preview.havefish.ml pointing to the preview group (blue). Once we are done with the testing we can promote the blue rollout to serve the active traffic. And we can prune the old version.
-
 We have 3 repositories: 
-1. [SampleWebApp](https://github.com/tanmayakp/sample-web-app) which contains a sample app written in python. 
-2. [KubeConfigStore](https://github.com/tanmayakp/kube-config-store) which stores the scripts and dependencies to create Kubernetes Objects and install variours components like istio, argocd etc. 
-3. [GitOpsConfigStore](https://github.com/tanmayakp/gitops-config-store.git) which stores helm charts for our application and the CI tool calculates the diff from here.
+   1. [SampleWebApp](https://github.com/tanmayakp/sample-web-app) which contains a sample app written in python. 
+   2. [KubeConfigStore](https://github.com/tanmayakp/kube-config-store) which stores the scripts and dependencies to create Kubernetes Objects and install variours  components like istio, argocd etc. 
+   3. [GitOpsConfigStore](https://github.com/tanmayakp/gitops-config-store.git) which stores helm charts for our application and the CI tool calculates the diff from here.
+   As we can see in the diagram we have an EKS cluster with Istio running. Once we change the image id of the application at [GitOpsConfigStore](https://github.com/tanmayakp/gitops-config-store.git) ArgoCD will detect the change and start deploying the preview rollout. We have two domain www.havefish.ml pointing to active group (green) and preview.havefish.ml pointing to the preview group (blue). Once we are done with the testing we can promote the blue rollout to serve the active traffic. And we can prune the old version.
+   We are using GitHub Action for CI. The version mentioned in [version.txt](https://github.com/tanmayakp/sample-web-app/blob/main/version.txt) will be used to create the image name. Ex: v1 is there in version.txt. The image will be tanmayakp/sample-web-app:v1
+
+
 
 
 ### Architecture
- 
+ ![image](https://user-images.githubusercontent.com/51740283/117567658-aacf3f00-b0da-11eb-9e2d-25c6b23a9717.png)
+![image](https://user-images.githubusercontent.com/51740283/117567667-b6226a80-b0da-11eb-815f-bfc4e239fb3d.png)
+
 
 
 ## Installation
@@ -46,7 +52,7 @@ The installation steps will install and configure followings:
 6.  Run `6.create application on argo`. Create 2 application `sample-web-app` (blue-green) and `sample-flask-app` (canary).
 
 
-> **NOTE**: DNS takes some time to propagate after step 3 which is required to perform step 7
+> **NOTE**: DNS takes some time to propagate after step 3 which is required to perform step 6
 
 ## Explanation
 
@@ -55,6 +61,7 @@ We will go in detail on each component from here.
 ### SSL
 
 There are multiple choices for the location of SSL offloading. We can offload that at AWS NLB as well as Ingress. Here we are adding it at Service Mesh Gateway level. For that we are creating a  secret of type tls.
+
 `kubectl create -n istio-system secret tls havefish-creds --key=IstioConfigs/server.key --cert=IstioConfigs/www_havefish_ml.crt`
 
 
@@ -63,11 +70,16 @@ We can configure some autorotating certificates like letsencrypt or zerossl with
 ### Istio
 
 We are using default profile of istio where it installs the istio-ingressgateway with AWS Classic Loadbalancer by default. We are changing that to NLB type.
+
 `kubectl annotate svc istio-ingressgateway service.beta.kubernetes.io/aws-load-balancer-type="nlb" -n istio-system`
+
 We are enabling auto sidecar injection to out application pods by annotating the namespace `sample-app`
+
 `kubectl label namespace sample-app istio-injection=enabled`
+
 Apart for the main installation we are adding monitoring tools like prometheus, grafana, zipkin etc
 We are using the secret genereted before on `defalut-gateway`
+
 ```yaml
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
@@ -106,6 +118,9 @@ Here are few ArgoCD specific Keywords:
 `Application` : An unit which maps one gitops path (One helm chart ). 
 Ex:
 
+![image](https://user-images.githubusercontent.com/51740283/117567724-fbdf3300-b0da-11eb-80ea-b71f193035aa.png)
+
+
 Here we can see we are creating one application object which points to the below repo and path (Helm chart)
 ```yaml
 repoURL: https://github.com/tanmayakp/gitops-config-store.git
@@ -132,10 +147,12 @@ spec:
 ```
 
 We have kept the auto sync option to false. Once we push our changes it calculates the diff and prepares a rollout plan as per the strategy we have defined. 
+![image](https://user-images.githubusercontent.com/51740283/117567736-13b6b700-b0db-11eb-9dd9-ee1c2fa58e76.png)
 
 As we can see one revision is at active and green and the new revision in blue. The virtualservice config at gitops-config-store/rollouts/sample-web-app/values.yaml defines that `preview.havefish.ml` points to the blue one and  `www.havefish.ml` points to the green one. One we do the promotion both will point the active one.
 We can promote it by 
 `kubectl argo rollouts promote sample-web-app -n sample-app` 
+![image](https://user-images.githubusercontent.com/51740283/117567750-229d6980-b0db-11eb-9be0-1209b1ecf11c.png)
 
 After the promotion as you can see the newer revision became active and older revision is getting terminated.
 
