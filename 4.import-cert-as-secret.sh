@@ -44,7 +44,7 @@ kubectl create -n istio-system secret tls havefish-ssl --key=IstioConfigs/key.pe
 # kind: Certificate
 # metadata:
 #   name: havefish-ssl
-#   namespace: kube-system
+#   namespace: istio-system
 # spec:
 #   commonName: "*.havefish.ml"
 #   dnsNames:
